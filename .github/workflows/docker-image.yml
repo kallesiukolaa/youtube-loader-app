@@ -1,0 +1,20 @@
+name: Docker Image CI
+
+on:
+    push:
+        branches: ["main"]
+
+jobs:
+    builds:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Get Image Tag
+              id: image-tag
+              run: echo "::set-output name=image-tag-name::website-image-name-$(date +%s)"
+
+            - uses: actions/checkout@v4
+            - name: Build the Docker image
+              env:
+                IMAGE_TAG_NAME: ${{ steps.image-tag.outputs.image-tag-name }}
+              run: docker build --build-arg EFS_PATH_BUILD=/my-videos . -t $IMAGE_TAG_NAME
