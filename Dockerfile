@@ -7,6 +7,7 @@ ENV EFS_PATH=${EFS_PATH_BUILD}
 # Combine all root-level commands into a single RUN instruction to ensure correct order of operations and reduce image layers.
 RUN apk upgrade --no-cache && \
     apk add --no-cache yt-dlp && \
+    apk add --no-cache aws-cli && \
     addgroup -S yt-dlp_user && \
     adduser -S -D -G yt-dlp_user yt-dlp_user && \
     mkdir -p ${EFS_PATH_BUILD} && \
