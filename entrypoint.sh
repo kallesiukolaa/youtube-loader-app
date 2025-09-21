@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Needed environment variables for the container
-# YOUTUBE_URL = the url from where to download the life
+# YOUTUBE_URL = the url from where to download the live
 # EFS_PATH = the file mount location. The subfolders and mp4 files are stored here temporary
 # VIDEO_NAME = the live name, this will be the file name
 # $S3_URI = S3 url for the folder where the file will be stored, no video name here
