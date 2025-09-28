@@ -22,11 +22,12 @@ data "archive_file" "source" {
 
 # Creates a Google Cloud Storage bucket to hold the function's code
 resource "google_storage_bucket" "bucket" {
-  name     = "${var.function_name}-source-bucket123123"
+  name    = "${var.function_name}-source-bucket123123"
   location = var.region
   uniform_bucket_level_access = true
 }
 
+# 🛠️ FIX 1: Removed the unsupported 'content_hash' line.
 # Uploads the zipped source code to the bucket
 resource "google_storage_bucket_object" "archive" {
   name   = "function-source.zip"
@@ -34,24 +35,36 @@ resource "google_storage_bucket_object" "archive" {
   source = data.archive_file.source.output_path
 }
 
-# Deploys the Cloud Function
-resource "google_cloudfunctions_function" "my_function" {
-  name     = var.function_name
-  runtime  = var.runtime
-  region   = var.region
-
-  entry_point         = "hello_http"
-  source_archive_bucket = google_storage_bucket.bucket.name
-  source_archive_object = google_storage_bucket_object.archive.name
-
-  trigger_http = true
+# Ensures the Cloud Run API is enabled, as it is required for Gen 2 Functions
+resource "google_project_service" "cloud_run_api" {
+  project = file("project.txt")
+  service = "run.googleapis.com"
+  disable_on_destroy = false
 }
 
-# Allows the function to be invoked publicly
-resource "google_cloudfunctions_function_iam_member" "invoker" {
-  project        = file("project.txt")
-  region         = google_cloudfunctions_function.my_function.region
-  cloud_function = google_cloudfunctions_function.my_function.name
-  role           = "roles/cloudfunctions.invoker"
-  member         = "allUsers"
+# Deploys the Cloud Function
+resource "google_cloudfunctions2_function" "my_function" {
+  name     = var.function_name
+  location = var.region
+
+  build_config {
+    runtime = var.runtime
+    source {
+      storage_source {
+        bucket = google_storage_bucket.bucket.name
+        # 🛠️ FIX 2: Reference the object's name in the bucket, not the local file path.
+        object = google_storage_bucket_object.archive.name
+      }
+    }
+    entry_point = "check_live_stream"
+  }
+}
+
+# 🛠️ FIX 3: Changed to the correct 2nd Gen/Cloud Run IAM resource and role.
+# Allows the 2nd Generation function's underlying Cloud Run service to be invoked publicly
+resource "google_cloud_run_service_iam_member" "invoker_v2" {
+  location = google_cloudfunctions2_function.my_function.location
+  service  = google_cloudfunctions2_function.my_function.name
+  role     = "roles/run.invoker" # Required role for Cloud Run invoker
+  member   = "allUsers"
 }
