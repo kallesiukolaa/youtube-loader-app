@@ -42,6 +42,41 @@ resource "google_project_service" "cloud_run_api" {
   disable_on_destroy = false
 }
 
+# Ensures the Cloud Scheduler API is enabled
+resource "google_project_service" "cloud_scheduler_api" {
+  project = file("project.txt")
+  service = "cloudscheduler.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Creates a Pub/Sub topic for the scheduler to target
+resource "google_pubsub_topic" "function_schedule_topic" {
+  project = file("project.txt")
+  name    = "${var.function_name}-schedule-topic"
+  # You may need to add a depends_on if the pubsub.googleapis.com API is not yet enabled
+}
+
+# Creates a Cloud Scheduler job to trigger the Pub/Sub topic
+resource "google_cloud_scheduler_job" "function_scheduler" {
+  project  = file("project.txt")
+  name     = "${var.function_name}-scheduler"
+  region   = var.region
+  
+  schedule = var.schedule
+  
+  # A descriptive name/payload to send to the function (optional but useful)
+  time_zone = "Europe/Helsinki" 
+
+  pubsub_target {
+    topic_name = google_pubsub_topic.function_schedule_topic.id
+    data       = base64encode(file("check-channel-event.json"))
+  }
+
+  depends_on = [
+    google_project_service.cloud_scheduler_api
+  ]
+}
+
 # Deploys the Cloud Function
 resource "google_cloudfunctions2_function" "my_function" {
   name     = var.function_name
@@ -57,6 +92,13 @@ resource "google_cloudfunctions2_function" "my_function" {
       }
     }
     entry_point = "check_live_stream"
+  }
+  event_trigger {
+    trigger_region = var.region
+    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic   = google_pubsub_topic.function_schedule_topic.id
+    
+    # Required for Cloud Functions to automatically manage the Eventarc Service Account
   }
 }
 

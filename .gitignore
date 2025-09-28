@@ -41,3 +41,6 @@ gkesa_acc.json
 
 # Ignore the project file
 project.txt
+
+# Do not reveal the channel 
+check-channel-event.json

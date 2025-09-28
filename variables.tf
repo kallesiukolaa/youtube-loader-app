@@ -15,3 +15,9 @@ variable "runtime" {
   type        = string
   default     = "python311"
 }
+
+variable "schedule" {
+  description = "The schedule used for the Google function"
+  type        = string
+  default     = "*/20 * * * *"
+}

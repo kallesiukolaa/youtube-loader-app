@@ -2,6 +2,9 @@
 
 from googleapiclient.discovery import build
 import os
+import functions_framework
+import base64
+import json 
 
 def get_channel_id_from_handle(handle):
     # Initializes using the Cloud Function's Service Account (no API key needed)
@@ -23,7 +26,8 @@ def get_channel_id_from_handle(handle):
         return None
 
 # The entry point for the Google Cloud Function
-def check_live_stream(request):
+@functions_framework.cloud_event
+def check_live_stream(cloud_event):
     """
     Checks if a given YouTube channel is currently live streaming using
     the function's Service Account credentials (no API Key needed).
@@ -35,14 +39,28 @@ def check_live_stream(request):
     """
     
     # 1. Get the channel ID from the request (No API key retrieval needed)
-    request_json = request.get_json(silent=True)
-    request_args = request.args
+    pubsub_message = cloud_event.data.get("message")
+    if not ( pubsub_message and "data" in pubsub_message):
+        return {"error": f"Incorrect cloud event provided {cloud_event}"}
     
-    # ... (Keep the request parsing logic as before)
+    # Extract the Base64 encoded payload
+    encoded_data = pubsub_message["data"]
+        
+    # Decode the payload to get your original string (or JSON string)
+    request_json = base64.b64decode(encoded_data).decode('utf-8')
+
+    print(f"Received scheduled payload: {request_json}")
+
+    # Try to parse the request to json
+    try:
+        request_json = json.loads(request_json)
+    except json.JSONDecodeError:
+        print(f"Error: Could not parse payload as JSON: {request_json}")
+        return "Payload Error"
+    
+    # Validate the json; it should contain channel_handle-attribute
     if request_json and 'channel_handle' in request_json:
         channel_handle = request_json['channel_handle']
-    elif request_args and 'channel_handle' in request_args:
-        channel_handle = request_args['channel_handle']
     else:
         return {"error": "Please provide a 'channel_handle' in the request body or query parameters."}, 400
 
