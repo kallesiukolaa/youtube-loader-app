@@ -10,6 +10,24 @@ variable "function_name" {
   default     = "my-terraform-function"
 }
 
+variable "image_uri" {
+  description = "The uri for the image used for downloading the stream."
+  type        = string
+  default     = "ghcr.io/kallesiukolaa/youtube_loader:latest"
+}
+
+variable "batch_job_name" {
+  description = "The name for the batch job."
+  type        = string
+  default     = "my-batch-container-job"
+}
+
+variable "mount_path" {
+  description = "The path for the container mount."
+  type        = string
+  default     = "/efs"
+}
+
 variable "runtime" {
   description = "The Cloud Function runtime"
   type        = string

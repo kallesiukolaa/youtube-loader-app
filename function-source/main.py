@@ -4,7 +4,72 @@ from googleapiclient.discovery import build
 import os
 import functions_framework
 import base64
-import json 
+import json
+from google.cloud import run_v2
+
+# Your function's entry point (e.g., triggered by an HTTP request or Pub/Sub)
+def launch_job_to_load_video(video_url):
+    """
+    Launches the target Cloud Run Job with specific environment variables.
+    """
+    
+    # --- Configuration ---
+    PROJECT_ID = os.environ.get('GCP_PROJECT_ID') # Get this from the environment
+    REGION = os.environ.get('REGION')             # Get this from the environment
+    JOB_NAME = os.environ.get('JOB_NAME')           # The name of the job defined in Terraform
+    
+    # --- Environment Variables to Pass ---
+    CUSTOM_ENV_VARS = {
+        "EFS_PATH": os.environ.get('MOUNT_PATH'),
+        "YOUTUBE_URL": video_url
+    }
+    # --------------------------------------
+
+    try:
+        # Initialize the Cloud Run client
+        client = run_v2.JobsClient()
+        
+        # Build the full resource name for the job
+        job_name = f"projects/{PROJECT_ID}/locations/{REGION}/jobs/{JOB_NAME}"
+
+        # Build the overrides needed for the execution call
+        overrides = run_v2.RunJobRequest.Overrides(
+            container_overrides=[
+                run_v2.RunJobRequest.Overrides.ContainerOverride(
+                    # Only one container in your job, so index 0
+                    container_index=0, 
+                    env_changes=[
+                        # Convert your dictionary to the required list of EnvVar objects
+                        run_v2.EnvVar(name=name, value=value)
+                        for name, value in CUSTOM_ENV_VARS.items()
+                    ]
+                )
+            ]
+        )
+
+        # Temporary to avoid runs
+
+        return "Not running yet!"
+        
+        # Prepare the request to execute the job
+        request = run_v2.RunJobRequest(
+            name=job_name,
+            overrides=overrides,
+        )
+
+        print(f"Executing job {JOB_NAME} with overrides: {CUSTOM_ENV_VARS}")
+
+        # Send the API call to execute the job
+        operation = client.run_job(request=request)
+        
+        # Note: client.run_job returns an Operation object,
+        # indicating the execution has started, but not necessarily finished.
+
+        return f"Cloud Run Job '{JOB_NAME}' execution started. Operation: {operation.name}", 200
+
+    except Exception as e:
+        print(f"Error launching job: {e}")
+        return f"Error launching job: {str(e)}", 500
 
 def get_channel_id_from_handle(handle):
     # Initializes using the Cloud Function's Service Account (no API key needed)
@@ -85,13 +150,17 @@ def check_live_stream(cloud_event):
             item = search_response['items'][0]
             video_id = item['id']['videoId']
             title = item['snippet']['title']
+
+            url = f"https://www.youtube.com/watch?v={video_id}"
+
+            launch_job_to_load_video(url)
             
             return {
                 "channel_id": channel_id,
                 "is_live": True,
                 "video_id": video_id,
                 "title": title,
-                "url": f"https://www.youtube.com/watch?v={video_id}"
+                "url": url
             }, 200
         else:
             return {
