@@ -37,5 +37,6 @@ variable "runtime" {
 variable "schedule" {
   description = "The schedule used for the Google function"
   type        = string
-  default     = "*/20 * * * *"
+  #default     = "*/60 * * * *"
+  default = "0 * * * *"
 }

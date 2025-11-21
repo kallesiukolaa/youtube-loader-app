@@ -5,10 +5,27 @@ import os
 import functions_framework
 import base64
 import json
-from google.cloud import run_v2
+from google.cloud import run_v2, storage
+from datetime import date
+from urllib.parse import urlparse, parse_qs
+
+def get_current_date_yyyymmdd():
+    """
+    Returns the current date as a string in the format YYYYMMDD.
+    """
+    # Get the current date object
+    today = date.today()
+    
+    # Format the date object into the 'yyyymmdd' string format
+    # %Y = full year (e.g., 2025)
+    # %m = month as a zero-padded number (e.g., 11)
+    # %d = day of the month as a zero-padded number (e.g., 21)
+    formatted_date = today.strftime("%Y%m%d")
+    
+    return formatted_date
 
 # Your function's entry point (e.g., triggered by an HTTP request or Pub/Sub)
-def launch_job_to_load_video(video_url):
+def launch_job_to_load_video(video_url, channel_handle):
     """
     Launches the target Cloud Run Job with specific environment variables.
     """
@@ -17,15 +34,40 @@ def launch_job_to_load_video(video_url):
     PROJECT_ID = os.environ.get('GCP_PROJECT_ID') # Get this from the environment
     REGION = os.environ.get('REGION')             # Get this from the environment
     JOB_NAME = os.environ.get('JOB_NAME')           # The name of the job defined in Terraform
+    CONTAINER_NAME = "main-container"
+    LOCK_BUCKET_NAME = os.environ.get('VIDEO_BUCKET')
+
+    print(f"The lock bucket is {LOCK_BUCKET_NAME}")
+
+    query = urlparse(video_url).query
+    video_id = parse_qs(query).get('v', [None])[0]
+
+    LOCK_FILE_NAME = f"lock/{video_id}.lock"
+
+    storage_client = storage.Client()
+    lock_bucket = storage_client.bucket(LOCK_BUCKET_NAME)
     
     # --- Environment Variables to Pass ---
     CUSTOM_ENV_VARS = {
         "EFS_PATH": os.environ.get('MOUNT_PATH'),
-        "YOUTUBE_URL": video_url
+        "YOUTUBE_URL": video_url,
+        "GCS_URI": f"gs://{os.environ.get('VIDEO_BUCKET')}/{channel_handle}/{get_current_date_yyyymmdd()}"
     }
     # --------------------------------------
 
     try:
+
+        # 1. CHECK LOCK: Attempt to get the lock file metadata
+        if lock_bucket.blob(LOCK_FILE_NAME).exists():
+            print(f"Lock file found for video ID {video_id}. Job submission aborted.")
+            return f"Video {video_id} is already being processed or is complete.", 200
+
+        lock_bucket.blob(LOCK_FILE_NAME).upload_from_string(
+            data="", 
+            content_type="text/plain"
+        )
+        print(f"Lock file created: {LOCK_FILE_NAME}")
+        
         # Initialize the Cloud Run client
         client = run_v2.JobsClient()
         
@@ -37,8 +79,8 @@ def launch_job_to_load_video(video_url):
             container_overrides=[
                 run_v2.RunJobRequest.Overrides.ContainerOverride(
                     # Only one container in your job, so index 0
-                    container_index=0, 
-                    env_changes=[
+                    name=CONTAINER_NAME,
+                    env=[
                         # Convert your dictionary to the required list of EnvVar objects
                         run_v2.EnvVar(name=name, value=value)
                         for name, value in CUSTOM_ENV_VARS.items()
@@ -153,7 +195,7 @@ def check_live_stream(cloud_event):
 
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            launch_job_to_load_video(url)
+            launch_job_to_load_video(url, channel_handle)
             
             return {
                 "channel_id": channel_id,

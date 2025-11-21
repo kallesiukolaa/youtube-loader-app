@@ -27,6 +27,13 @@ resource "google_storage_bucket" "bucket" {
   uniform_bucket_level_access = true
 }
 
+# Creates a Google Cloud Storage bucket to hold the loaded videos
+resource "google_storage_bucket" "video_bucket" {
+  name    = "${var.function_name}-videos-bucket123123"
+  location = var.region
+  uniform_bucket_level_access = true
+}
+
 # 🛠️ FIX 1: Removed the unsupported 'content_hash' line.
 # Uploads the zipped source code to the bucket
 resource "google_storage_bucket_object" "archive" {
@@ -99,6 +106,7 @@ resource "google_cloudfunctions2_function" "my_function" {
     environment_variables = {
       JOB_NAME   = var.batch_job_name
       MOUNT_PATH = var.mount_path
+      VIDEO_BUCKET = "${var.function_name}-videos-bucket123123"
     }
   }
   event_trigger {
@@ -176,6 +184,7 @@ resource "google_cloud_run_v2_job" "batch_job" {
   template {
     template {
       containers {
+        name = "main-container"
         image = local.proxied_image_uri 
         volume_mounts {
           name = "output-location"
