@@ -46,6 +46,7 @@ if ! yt-dlp "$YOUTUBE_URL" --live-from-start -o "$FILE_PATH_ENTIRE"; then
 
     # Retry without the --live-from-start flag
     # If this one fails, the script will exit with error (due to set -e)
+    echo yt-dlp "$YOUTUBE_URL" -o "$FILE_PATH_ENTIRE"
     yt-dlp "$YOUTUBE_URL" -o "$FILE_PATH_ENTIRE"
 
 else
