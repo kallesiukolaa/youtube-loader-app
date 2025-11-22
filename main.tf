@@ -103,11 +103,6 @@ resource "google_cloudfunctions2_function" "my_function" {
       }
     }
     entry_point = "check_live_stream"
-    environment_variables = {
-      JOB_NAME   = var.batch_job_name
-      MOUNT_PATH = var.mount_path
-      VIDEO_BUCKET = "${var.function_name}-videos-bucket123123"
-    }
   }
   event_trigger {
     trigger_region = var.region
@@ -115,6 +110,13 @@ resource "google_cloudfunctions2_function" "my_function" {
     pubsub_topic   = google_pubsub_topic.function_schedule_topic.id
     
     # Required for Cloud Functions to automatically manage the Eventarc Service Account
+  }
+  service_config {
+    environment_variables = {
+      JOB_NAME   = var.batch_job_name
+      MOUNT_PATH = var.mount_path
+      VIDEO_BUCKET = "${var.function_name}-videos-bucket123123"
+    }
   }
 }
 
