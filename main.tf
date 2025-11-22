@@ -34,6 +34,18 @@ resource "google_storage_bucket" "video_bucket" {
   uniform_bucket_level_access = true
 }
 
+# This is the identity that Cloud Run uses automatically if you don't specify one.
+data "google_compute_default_service_account" "default" {
+  project = file("project.txt")
+}
+
+# "objectUser" allows downloading cookies.txt AND uploading video.mp4
+resource "google_storage_bucket_iam_member" "storage_user" {
+  bucket = google_storage_bucket.video_bucket.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+}
+
 # 🛠️ FIX 1: Removed the unsupported 'content_hash' line.
 # Uploads the zipped source code to the bucket
 resource "google_storage_bucket_object" "archive" {
