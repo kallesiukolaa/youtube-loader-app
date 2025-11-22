@@ -187,6 +187,7 @@ resource "google_cloud_run_v2_job" "batch_job" {
   location = var.region
   template {
     template {
+      timeout = "21600s"
       containers {
         name = "main-container"
         image = local.proxied_image_uri 
