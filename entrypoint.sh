@@ -35,7 +35,7 @@ echo "Attempting download with --live-from-start..."
 
 # We use an 'if ! ...' block here. This prevents 'set -e' from exiting the script 
 # if this specific command fails, allowing us to run the 'else' block.
-if ! yt-dlp "$YOUTUBE_URL" --wait-for-video --live-from-start -o "$FILE_PATH_ENTIRE"; then
+if ! yt-dlp "$YOUTUBE_URL" --live-from-start -o "$FILE_PATH_ENTIRE"; then
     
     echo "⚠️  WARNING: Download with --live-from-start failed."
     echo "This usually means the stream does not support rewinding (DVR is disabled)."
@@ -46,7 +46,7 @@ if ! yt-dlp "$YOUTUBE_URL" --wait-for-video --live-from-start -o "$FILE_PATH_ENT
 
     # Retry without the --live-from-start flag
     # If this one fails, the script will exit with error (due to set -e)
-    yt-dlp "$YOUTUBE_URL" --wait-for-video -o "$FILE_PATH_ENTIRE"
+    yt-dlp "$YOUTUBE_URL" -o "$FILE_PATH_ENTIRE"
 
 else
     echo "✅ Download finished successfully (captured from start)."

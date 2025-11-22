@@ -25,7 +25,7 @@ variable "batch_job_name" {
 variable "mount_path" {
   description = "The path for the container mount."
   type        = string
-  default     = "/efs"
+  default     = "/tmp"
 }
 
 variable "runtime" {
