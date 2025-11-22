@@ -1,75 +1,78 @@
 #!/bin/bash
 
-# 🛠️ Fail fast on errors (standard best practice), but we will handle the yt-dlp error manually below.
+# Fail fast settings
 set -e
 set -o pipefail
 
-# =================================================================
-# Environment Variables:
 # -----------------------------------------------------------------
-# YOUTUBE_URL = The URL from which to download the YouTube live stream.
-# EFS_PATH    = The temporary file mount location.
-# VIDEO_NAME  = The live name, which will be the final file name.
-# GCS_URI     = Google Cloud Storage path.
-# =================================================================
-
-echo "Starting to download Youtube video from url $YOUTUBE_URL"
-
-# Generate a random suffix for a temporary, unique folder to avoid conflicts
-OUTPUTFILE_SUFFIX=$RANDOM
-
-# Define the full path for the temporary directory and the output file
-EFS_PATH_ENTIRE="$EFS_PATH/$OUTPUTFILE_SUFFIX"
-FILE_PATH_ENTIRE="$EFS_PATH_ENTIRE/$VIDEO_NAME.mp4"
-
-echo "Saving the file temporarily in the location $FILE_PATH_ENTIRE"
-
-# Create the temporary directory
-mkdir -p "$EFS_PATH_ENTIRE"
-
-# -----------------------------------------------------------------
-# 1. Download the YouTube live video using yt-dlp with Fallback Logic
+# 1. Configuration & Cookie Setup
 # -----------------------------------------------------------------
 
-echo "Attempting download with --live-from-start..."
-
-# We use an 'if ! ...' block here. This prevents 'set -e' from exiting the script 
-# if this specific command fails, allowing us to run the 'else' block.
-if ! yt-dlp "$YOUTUBE_URL" --live-from-start -o "$FILE_PATH_ENTIRE"; then
-    
-    echo "⚠️  WARNING: Download with --live-from-start failed."
-    echo "This usually means the stream does not support rewinding (DVR is disabled)."
-    echo "🔄 RETRYING: Falling back to recording from the CURRENT moment..."
-
-    # Remove any partial file artifacts from the failed attempt to ensure clean slate
-    rm -f "$FILE_PATH_ENTIRE.part"
-
-    # Retry without the --live-from-start flag
-    # If this one fails, the script will exit with error (due to set -e)
-    echo yt-dlp "$YOUTUBE_URL" -o "$FILE_PATH_ENTIRE"
-    yt-dlp "$YOUTUBE_URL" -o "$FILE_PATH_ENTIRE"
-
-else
-    echo "✅ Download finished successfully (captured from start)."
-fi
-
-# -----------------------------------------------------------------
-# 2. Upload the file to Google Cloud Storage (GCS)
-# -----------------------------------------------------------------
-
-echo "Moving the output file from $FILE_PATH_ENTIRE to GCS location $GCS_URI/$VIDEO_NAME.mp4"
-
-# Check if file exists before moving (in case both download attempts failed silently or zero-byte)
-if [ -f "$FILE_PATH_ENTIRE" ]; then
-    gsutil mv "$FILE_PATH_ENTIRE" "$GCS_URI/$VIDEO_NAME.mp4"
-else
-    echo "❌ ERROR: Output file not found at $FILE_PATH_ENTIRE. Download likely failed."
+if [ -z "$YOUTUBE_URL" ]; then
+    echo "❌ ERROR: The environment variable 'YOUTUBE_URL' is empty."
     exit 1
 fi
 
-# -----------------------------------------------------------------
-# 3. Clean up the temporary directory
-# -----------------------------------------------------------------
-rm -rf "$EFS_PATH_ENTIRE"
+# Extract the bucket name from the GCS_URI (e.g., gs://my-bucket/handle/date -> my-bucket)
+# We use this to find the cookies.txt file at the root of the bucket.
+BUCKET_NAME=$(echo "$GCS_URI" | cut -d'/' -f3)
+COOKIE_FILE="/tmp/cookies.txt"
 
-echo "Download and upload complete. Temporary files cleaned up."
+echo "🔍 Detected Bucket: $BUCKET_NAME"
+echo "⬇️  Downloading cookies.txt from gs://$BUCKET_NAME/cookies.txt..."
+
+# Try to download cookies. If it fails, we warn but try to proceed without them.
+if gsutil cp "gs://$BUCKET_NAME/cookies.txt" "$COOKIE_FILE"; then
+    echo "✅ Cookies downloaded successfully."
+    COOKIE_ARGS="--cookies $COOKIE_FILE"
+else
+    echo "⚠️  WARNING: Could not download cookies.txt. Proceeding without authentication."
+    echo "If you get a 'Sign in to confirm' error, ensure cookies.txt is in the bucket root."
+    COOKIE_ARGS=""
+fi
+
+# -----------------------------------------------------------------
+# 2. Setup Variables
+# -----------------------------------------------------------------
+
+WAIT_INTERVAL=15
+OUTPUTFILE_SUFFIX=$RANDOM
+EFS_PATH_ENTIRE="$EFS_PATH/$OUTPUTFILE_SUFFIX"
+FILE_PATH_ENTIRE="$EFS_PATH_ENTIRE/$VIDEO_NAME.mp4"
+
+mkdir -p "$EFS_PATH_ENTIRE"
+
+echo "Starting download for: $YOUTUBE_URL"
+
+# -----------------------------------------------------------------
+# 3. Download Logic (With Cookies)
+# -----------------------------------------------------------------
+
+# NOTE: Added $COOKIE_ARGS to both commands below
+
+if ! yt-dlp "$YOUTUBE_URL" $COOKIE_ARGS --wait-for-video $WAIT_INTERVAL --live-from-start -o "$FILE_PATH_ENTIRE"; then
+    
+    echo "⚠️  --live-from-start failed. Retrying from current moment..."
+    rm -f "$FILE_PATH_ENTIRE.part"
+    
+    # Retry safely with cookies
+    yt-dlp "$YOUTUBE_URL" $COOKIE_ARGS --wait-for-video $WAIT_INTERVAL -o "$FILE_PATH_ENTIRE"
+
+fi
+
+# -----------------------------------------------------------------
+# 4. Upload Logic
+# -----------------------------------------------------------------
+
+if [ -f "$FILE_PATH_ENTIRE" ]; then
+    echo "Moving file to GCS..."
+    gsutil mv "$FILE_PATH_ENTIRE" "$GCS_URI/$VIDEO_NAME.mp4"
+else
+    echo "❌ ERROR: Output file missing."
+    exit 1
+fi
+
+# Cleanup
+rm -rf "$EFS_PATH_ENTIRE"
+# Also remove the cookie file for security
+rm -f "$COOKIE_FILE"
