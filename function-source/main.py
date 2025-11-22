@@ -25,7 +25,7 @@ def get_current_date_yyyymmdd():
     return formatted_date
 
 # Your function's entry point (e.g., triggered by an HTTP request or Pub/Sub)
-def launch_job_to_load_video(video_url, channel_handle):
+def launch_job_to_load_video(video_url, channel_handle, video_title):
     """
     Launches the target Cloud Run Job with specific environment variables.
     """
@@ -37,8 +37,6 @@ def launch_job_to_load_video(video_url, channel_handle):
     CONTAINER_NAME = "main-container"
     LOCK_BUCKET_NAME = os.environ.get('VIDEO_BUCKET')
 
-    print(f"The lock bucket is {LOCK_BUCKET_NAME}")
-
     query = urlparse(video_url).query
     video_id = parse_qs(query).get('v', [None])[0]
 
@@ -47,14 +45,6 @@ def launch_job_to_load_video(video_url, channel_handle):
     storage_client = storage.Client()
     lock_bucket = storage_client.bucket(LOCK_BUCKET_NAME)
     
-    # --- Environment Variables to Pass ---
-    CUSTOM_ENV_VARS = {
-        "EFS_PATH": os.environ.get('MOUNT_PATH'),
-        "YOUTUBE_URL": video_url,
-        "GCS_URI": f"gs://{os.environ.get('VIDEO_BUCKET')}/{channel_handle}/{get_current_date_yyyymmdd()}"
-    }
-    # --------------------------------------
-
     try:
 
         # 1. CHECK LOCK: Attempt to get the lock file metadata
@@ -67,6 +57,16 @@ def launch_job_to_load_video(video_url, channel_handle):
             content_type="text/plain"
         )
         print(f"Lock file created: {LOCK_FILE_NAME}")
+
+        # --- Environment Variables to Pass ---
+        CUSTOM_ENV_VARS = {
+            "EFS_PATH": os.environ.get('MOUNT_PATH'),
+            "YOUTUBE_URL": video_url,
+            "GCS_URI": f"gs://{os.environ.get('VIDEO_BUCKET')}/{channel_handle}/{get_current_date_yyyymmdd()}",
+            "VIDEO_NAME": video_title
+        }
+        # --------------------------------------
+
         
         # Initialize the Cloud Run client
         client = run_v2.JobsClient()
@@ -88,10 +88,6 @@ def launch_job_to_load_video(video_url, channel_handle):
                 )
             ]
         )
-
-        # Temporary to avoid runs
-
-        return "Not running yet!"
         
         # Prepare the request to execute the job
         request = run_v2.RunJobRequest(
@@ -107,7 +103,7 @@ def launch_job_to_load_video(video_url, channel_handle):
         # Note: client.run_job returns an Operation object,
         # indicating the execution has started, but not necessarily finished.
 
-        return f"Cloud Run Job '{JOB_NAME}' execution started. Operation: {operation.name}", 200
+        return f"Cloud Run Job '{JOB_NAME}' execution started. Operation: {operation.operation.name}", 200
 
     except Exception as e:
         print(f"Error launching job: {e}")
@@ -195,7 +191,7 @@ def check_live_stream(cloud_event):
 
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            launch_job_to_load_video(url, channel_handle)
+            launch_job_to_load_video(url, channel_handle, title)
             
             return {
                 "channel_id": channel_id,

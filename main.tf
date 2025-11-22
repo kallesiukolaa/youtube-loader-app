@@ -116,6 +116,8 @@ resource "google_cloudfunctions2_function" "my_function" {
       JOB_NAME   = var.batch_job_name
       MOUNT_PATH = var.mount_path
       VIDEO_BUCKET = "${var.function_name}-videos-bucket123123"
+      REGION       = var.region
+      GCP_PROJECT_ID = file("project.txt")
     }
   }
 }
