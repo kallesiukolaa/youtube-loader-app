@@ -56,7 +56,7 @@ upload_watcher() {
     echo "👀 Watcher started..."
     while true; do
 
-        if ! ls -tr *.mp4; do
+        if ! ls -tr *.mp4 2>/dev/null; do
             echo "No files yet, skipping"
             sleep 60
             continue
