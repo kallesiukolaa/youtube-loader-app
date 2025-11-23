@@ -101,6 +101,7 @@ WATCHER_PID=$!
 yt-dlp "$YOUTUBE_URL" \
     $COOKIE_ARGS \
     -S "proto:m3u8" \
+    -f "best" \
     --wait-for-video 15 \
     --live-from-start \
     --output - \
