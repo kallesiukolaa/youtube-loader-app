@@ -100,12 +100,16 @@ WATCHER_PID=$!
 
 yt-dlp "$YOUTUBE_URL" \
     $COOKIE_ARGS \
+    -f "best[ext=mp4]/best" \
     --wait-for-video 15 \
     --live-from-start \
     --output - \
     --quiet --no-progress \
     | ffmpeg \
-    -y -i - \
+    -y \
+    -analyzeduration 100M \
+    -probesize 100M \
+    -i - \
     -c copy \
     -f segment \
     -segment_time 900 \
