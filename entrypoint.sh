@@ -102,19 +102,18 @@ yt-dlp "$YOUTUBE_URL" \
     $COOKIE_ARGS \
     -S "proto:m3u8" \
     -f "best" \
-    --wait-for-video 15 \
-    --live-from-start \
     --output - \
     --quiet --no-progress \
     | ffmpeg \
     -y \
-    -analyzeduration 100M \
-    -probesize 100M \
+    -analyzeduration 1M \
+    -probesize 1M \
+    -fflags +flush_packets \
     -f mpegts -i - \
     -loglevel error \
     -c copy \
     -f segment \
-    -segment_time 900 \
+    -segment_time 300 \
     -reset_timestamps 1 \
     "video_part%03d.mp4"
 
