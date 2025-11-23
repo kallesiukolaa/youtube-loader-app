@@ -202,7 +202,13 @@ resource "google_cloud_run_v2_job" "batch_job" {
       timeout = "21600s"
       containers {
         name = "main-container"
-        image = local.proxied_image_uri 
+        image = local.proxied_image_uri
+        resources {
+          limits = {
+            memory = "4Gi" # Increase to 4 GB (was likely default 512MB)
+            cpu    = "2"   # Increase to 2 vCPUs for faster encoding
+          }
+        }
         volume_mounts {
           name = "output-location"
           mount_path = var.mount_path
