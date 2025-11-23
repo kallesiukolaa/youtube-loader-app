@@ -55,6 +55,12 @@ echo "📡 Segments will be uploaded to: $GCS_FOLDER/"
 upload_watcher() {
     echo "👀 Watcher started..."
     while true; do
+
+        if ! ls -tr *.mp4; do
+            echo "No files yet, skipping"
+            sleep 60
+            continue
+        fi
         # 1. List all mp4 files sorted by time (oldest first)
         FILES=( $(ls -tr *.mp4 2>/dev/null || echo) )
         
