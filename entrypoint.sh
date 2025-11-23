@@ -110,6 +110,7 @@ yt-dlp "$YOUTUBE_URL" \
     -analyzeduration 100M \
     -probesize 100M \
     -f mpegts -i - \
+    -loglevel error \
     -c copy \
     -f segment \
     -segment_time 900 \
