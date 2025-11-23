@@ -5,82 +5,68 @@ set -e
 set -o pipefail
 
 # =================================================================
-# 1. Configuration & Mount Check
+# 1. Configuration
 # =================================================================
 
 if [ -z "$YOUTUBE_URL" ]; then
-    echo "❌ ERROR: The environment variable 'YOUTUBE_URL' is empty."
+    echo "❌ ERROR: 'YOUTUBE_URL' is empty."
     exit 1
 fi
 
-# The Cloud Run Job mounts the bucket here (defined in main.tf)
-MOUNT_ROOT="/mnt/gcs_bucket"
-
-echo "🔍 Checking mount point at $MOUNT_ROOT..."
-if [ ! -d "$MOUNT_ROOT" ]; then
-    echo "❌ ERROR: Bucket not mounted at $MOUNT_ROOT."
+# We use the explicit BUCKET_NAME variable passed from main.py
+if [ -z "$BUCKET_NAME" ]; then
+    echo "❌ ERROR: 'BUCKET_NAME' env var is missing. Please update main.py."
     exit 1
 fi
 
 # -----------------------------------------------------------------
-# 2. Cookie Setup (Direct from Mount)
+# 2. Cookie Setup (Download locally)
 # -----------------------------------------------------------------
+# We download cookies to the local temp folder (RAM), which is fine for small files.
+COOKIE_FILE="/tmp/cookies.txt"
 
-# Since the bucket is mounted, cookies.txt should be right there.
-COOKIE_FILE="$MOUNT_ROOT/cookies.txt"
-
-echo "🍪 Checking for cookies at: $COOKIE_FILE"
-
-if [ -f "$COOKIE_FILE" ]; then
-    echo "✅ Cookies found."
+echo "⬇️  Downloading cookies from gs://$BUCKET_NAME/cookies.txt..."
+if gsutil cp "gs://$BUCKET_NAME/cookies.txt" "$COOKIE_FILE"; then
+    echo "✅ Cookies downloaded."
     COOKIE_ARGS="--cookies $COOKIE_FILE"
 else
-    echo "⚠️  WARNING: cookies.txt not found in bucket root."
-    echo "Proceeding without authentication."
+    echo "⚠️  WARNING: cookies.txt not found. Proceeding without auth."
     COOKIE_ARGS=""
 fi
 
 # -----------------------------------------------------------------
-# 3. Path Setup
-# -----------------------------------------------------------------
-# GCS_URI looks like: gs://bucket-name/handle/date
-# We need to extract just "handle/date" to create the folder inside the mount.
-
-# 1. Extract Bucket Name from URI (field 3)
-BUCKET_NAME_FROM_URI=$(echo "$GCS_URI" | cut -d'/' -f3)
-
-# 2. Extract Relative Path (everything after bucket name)
-# e.g., "handle/20231121"
-RELATIVE_PATH=$(echo "$GCS_URI" | sed "s|gs://$BUCKET_NAME_FROM_URI/||")
-
-# 3. Construct Full Local Path
-OUTPUT_DIR="$MOUNT_ROOT/$RELATIVE_PATH"
-FILE_PATH="$OUTPUT_DIR/$VIDEO_NAME.mp4"
-
-echo "📂 Creating directory: $OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR"
-
-# -----------------------------------------------------------------
-# 4. Download Logic (Direct Write)
+# 3. Stream Logic (The Fix)
 # -----------------------------------------------------------------
 
-echo "🎥 Starting download from: $YOUTUBE_URL"
-echo "💾 Writing directly to: $FILE_PATH"
+# Define the target path in GCS (without /mnt)
+# We add a timestamp to the filename so retries don't overwrite previous parts.
+TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+# Use .mkv because it is resilient to crashes (MP4 is not)
+GCS_TARGET="$GCS_URI/${VIDEO_NAME}_${TIMESTAMP}.mkv"
 
-WAIT_INTERVAL=15
+echo "🎥 Starting Live Stream Capture..."
+echo "📡 Streaming DIRECTLY to: $GCS_TARGET"
+echo "ℹ️  Note: If the job crashes, the file will be safe in the bucket up to that point."
 
-# Attempt 1: Try recording from the start (Rewind)
-# We write directly to the bucket mount. FUSE handles the streaming upload.
-if ! yt-dlp "$YOUTUBE_URL" $COOKIE_ARGS --wait-for-video $WAIT_INTERVAL --live-from-start -o "$FILE_PATH"; then
+# EXPLANATION OF COMMAND:
+# 1. yt-dlp -o -             -> Outputs the video data to 'Standard Out' (screen) instead of a file.
+# 2. --quiet --no-progress   -> Hides the progress bar so it doesn't mess up the video data stream.
+# 3. | gsutil cp - ...       -> Takes that video data and streams it instantly to Cloud Storage.
+
+if ! yt-dlp "$YOUTUBE_URL" \
+    $COOKIE_ARGS \
+    --wait-for-video 15 \
+    --live-from-start \
+    --output - \
+    --quiet --no-progress \
+    | gsutil cp - "$GCS_TARGET"; then
     
-    echo "⚠️  --live-from-start failed (DVR likely disabled)."
-    echo "🔄 RETRYING: Recording from CURRENT moment..."
-    
-    # Clean up any partial file that might have been created
-    rm -f "$FILE_PATH.part"
-    
-    # Attempt 2: Record from now
-    yt-dlp "$YOUTUBE_URL" $COOKIE_ARGS --wait-for-video $WAIT_INTERVAL -o "$FILE_PATH"
+    echo "⚠️  Stream interrupted or ended."
+else
+    echo "✅ Stream finished successfully."
 fi
 
-echo "✅ Download complete. Video is safely in the bucket."
+# -----------------------------------------------------------------
+# 4. Cleanup
+# -----------------------------------------------------------------
+rm -f "$COOKIE_FILE"

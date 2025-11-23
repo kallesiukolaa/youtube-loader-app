@@ -63,7 +63,8 @@ def launch_job_to_load_video(video_url, channel_handle, video_title):
             "EFS_PATH": os.environ.get('MOUNT_PATH'),
             "YOUTUBE_URL": video_url,
             "GCS_URI": f"gs://{os.environ.get('VIDEO_BUCKET')}/{channel_handle}/{get_current_date_yyyymmdd()}",
-            "VIDEO_NAME": video_title
+            "VIDEO_NAME": video_title,
+            "BUCKET_NAME": os.environ.get('VIDEO_BUCKET')
         }
         # --------------------------------------
 

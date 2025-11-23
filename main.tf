@@ -2,12 +2,12 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      # 🛠️ UPDATE: Must be 5.10.0 or higher for 'gcs' volume support
-      version = ">= 5.10.0"
+      # Using a stable modern version
+      version = ">= 5.0.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = ">= 5.10.0"
+      version = ">= 5.0.0"
     }
   }
 }
@@ -24,17 +24,15 @@ provider "google-beta" {
   credentials = file("gkesa_acc.json")
 }
 
-# -----------------------------------------------------------------
-# IAM & Security
-# -----------------------------------------------------------------
-
-# Get the default Service Account used by Cloud Run
+# Get the default Service Account used by Cloud Run/Functions
 data "google_compute_default_service_account" "default" {
   project = file("project.txt")
 }
 
 # Grant "Object User" (Read + Write) to the Video Bucket
-# This allows the job to mount the bucket via FUSE
+# This allows the job to:
+# 1. READ cookies.txt (Fixes "Proceeding without authentication")
+# 2. WRITE video files (Fixes upload permissions)
 resource "google_storage_bucket_iam_member" "storage_user" {
   bucket = google_storage_bucket.video_bucket.name
   role   = "roles/storage.objectUser"
@@ -42,7 +40,7 @@ resource "google_storage_bucket_iam_member" "storage_user" {
 }
 
 # -----------------------------------------------------------------
-# Storage Buckets
+# 2. Storage Buckets
 # -----------------------------------------------------------------
 
 # Source Code Bucket
@@ -60,38 +58,43 @@ resource "google_storage_bucket" "video_bucket" {
 }
 
 # -----------------------------------------------------------------
-# Cloud Function (Scheduler & Trigger)
+# 3. Cloud Function (Scheduler & Trigger)
 # -----------------------------------------------------------------
 
+# Zip the python source code
 data "archive_file" "source" {
   type        = "zip"
   source_dir  = "./function-source"
   output_path = "./function-source.zip"
 }
 
+# Upload zip to bucket
 resource "google_storage_bucket_object" "archive" {
   name   = "function-source.zip"
   bucket = google_storage_bucket.bucket.name
   source = data.archive_file.source.output_path
 }
 
+# Enable APIs
 resource "google_project_service" "cloud_run_api" {
-  project = file("project.txt")
-  service = "run.googleapis.com"
+  project            = file("project.txt")
+  service            = "run.googleapis.com"
   disable_on_destroy = false
 }
 
 resource "google_project_service" "cloud_scheduler_api" {
-  project = file("project.txt")
-  service = "cloudscheduler.googleapis.com"
+  project            = file("project.txt")
+  service            = "cloudscheduler.googleapis.com"
   disable_on_destroy = false
 }
 
+# Pub/Sub Topic
 resource "google_pubsub_topic" "function_schedule_topic" {
   project = file("project.txt")
   name    = "${var.function_name}-schedule-topic"
 }
 
+# Scheduler Job
 resource "google_cloud_scheduler_job" "function_scheduler" {
   project   = file("project.txt")
   name      = "${var.function_name}-scheduler"
@@ -101,12 +104,14 @@ resource "google_cloud_scheduler_job" "function_scheduler" {
 
   pubsub_target {
     topic_name = google_pubsub_topic.function_schedule_topic.id
-    data       = base64encode(file("check-channel-event.json"))
+    # Default payload to check a specific handle (can be overridden)
+    data       = base64encode(jsonencode({"channel_handle": "CHANGE_ME_TO_DEFAULT_HANDLE"}))
   }
 
   depends_on = [google_project_service.cloud_scheduler_api]
 }
 
+# The Cloud Function (Manager)
 resource "google_cloudfunctions2_function" "my_function" {
   name     = var.function_name
   location = var.region
@@ -132,13 +137,14 @@ resource "google_cloudfunctions2_function" "my_function" {
     environment_variables = {
       JOB_NAME       = var.batch_job_name
       MOUNT_PATH     = var.mount_path
-      VIDEO_BUCKET   = google_storage_bucket.video_bucket.name # Dynamic reference
+      VIDEO_BUCKET   = google_storage_bucket.video_bucket.name
       REGION         = var.region
       GCP_PROJECT_ID = file("project.txt")
     }
   }
 }
 
+# Make the Function Public (Optional - based on your original file)
 resource "google_cloud_run_service_iam_member" "invoker_v2" {
   location = google_cloudfunctions2_function.my_function.location
   service  = google_cloudfunctions2_function.my_function.name
@@ -147,15 +153,16 @@ resource "google_cloud_run_service_iam_member" "invoker_v2" {
 }
 
 # -----------------------------------------------------------------
-# Cloud Run Job (The Worker)
+# 4. Cloud Run Job (The Worker - Simplified)
 # -----------------------------------------------------------------
 
 resource "google_project_service" "artifact_registry_api" {
-  project = file("project.txt")
-  service = "artifactregistry.googleapis.com"
+  project            = file("project.txt")
+  service            = "artifactregistry.googleapis.com"
   disable_on_destroy = false
 }
 
+# Proxy GHCR so Cloud Run can pull images reliably
 resource "google_artifact_registry_repository" "ghcr_proxy" {
   provider      = google-beta
   location      = var.region
@@ -163,6 +170,7 @@ resource "google_artifact_registry_repository" "ghcr_proxy" {
   description   = "Remote repository proxying ghcr.io"
   format        = "DOCKER"
   mode          = "REMOTE_REPOSITORY"
+  
   remote_repository_config {
     common_repository {
       uri = "https://ghcr.io"
@@ -177,11 +185,8 @@ locals {
 }
 
 resource "google_cloud_run_v2_job" "batch_job" {
-  name         = var.batch_job_name
-  location     = var.region
-  
-  # 🛠️ BETA required for GCS Volume features
-  launch_stage = "BETA"
+  name     = var.batch_job_name
+  location = var.region
 
   template {
     template {
@@ -193,24 +198,10 @@ resource "google_cloud_run_v2_job" "batch_job" {
         
         resources {
           limits = {
-            memory = "4Gi" # High RAM for FFMPEG muxing overhead
+            # We keep RAM high to be safe, but piping uses much less than this.
+            memory = "4Gi" 
             cpu    = "2"
           }
-        }
-        
-        # Mount the bucket to /mnt/gcs_bucket
-        volume_mounts {
-          name       = "bucket-mount"
-          mount_path = "/mnt/gcs_bucket"
-        }
-      }
-
-      # Define the bucket as the volume source (Cloud Storage FUSE)
-      volumes {
-        name = "bucket-mount"
-        gcs {
-          bucket    = google_storage_bucket.video_bucket.name
-          read_only = false # Allow writing videos
         }
       }
     }
