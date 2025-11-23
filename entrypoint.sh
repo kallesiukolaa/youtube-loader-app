@@ -61,6 +61,8 @@ upload_watcher() {
         # 2. Count files. We need at least 2 files to know the first one is finished.
         # (FFmpeg keeps the latest file open for writing).
         COUNT=${#FILES[@]}
+
+        echo "There are $COUNT files available"
         
         if [ "$COUNT" -gt 1 ]; then
             # Loop through all files EXCEPT the last one (which is active)
