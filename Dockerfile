@@ -18,7 +18,6 @@ RUN mkdir -p ${EFS_PATH_BUILD}
 # 4. Script Setup
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
-# For some reason is not updating
 
 # 5. Run
 ENTRYPOINT ["/bin/bash", "-c", "./entrypoint.sh"]

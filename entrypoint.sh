@@ -43,6 +43,12 @@ SEGMENT_DIR="/my-videos/segments"
 mkdir -p "$SEGMENT_DIR"
 cd "$SEGMENT_DIR"
 
+# This replaces all characters that aren't letters, numbers, dots, or dashes with underscores.
+# It fixes the "CommandException" caused by '?', '|', and '!'.
+echo "Original Name: $VIDEO_NAME"
+VIDEO_NAME=$(echo "$VIDEO_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
+echo "Sanitized Name: $VIDEO_NAME"
+
 # GCS Destination Folder
 GCS_FOLDER="$GCS_URI/${VIDEO_NAME}_${TIMESTAMP}"
 
