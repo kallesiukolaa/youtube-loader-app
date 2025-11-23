@@ -56,7 +56,7 @@ upload_watcher() {
     echo "👀 Watcher started..."
     while true; do
         # 1. List all mp4 files sorted by time (oldest first)
-        FILES=( $(ls -tr *.mp4 2>/dev/null) )
+        FILES=( $(ls -tr *.mp4 2>/dev/null || echo) )
         
         # 2. Count files. We need at least 2 files to know the first one is finished.
         # (FFmpeg keeps the latest file open for writing).
