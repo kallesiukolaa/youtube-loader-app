@@ -38,5 +38,5 @@ variable "schedule" {
   description = "The schedule used for the Google function"
   type        = string
   #default     = "*/60 * * * *"
-  default = "*/5 * * * *"
+  default = "*/30 * * * *"
 }

@@ -35,38 +35,34 @@ else
 fi
 
 # -----------------------------------------------------------------
-# 3. Stream Logic (The Fix)
+# 3. Stream Logic (Segmented for Visibility)
 # -----------------------------------------------------------------
 
-# Define the target path in GCS (without /mnt)
-# We add a timestamp to the filename so retries don't overwrite previous parts.
-TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-# Use .mkv because it is resilient to crashes (MP4 is not)
-GCS_TARGET="$GCS_URI/${VIDEO_NAME}_${TIMESTAMP}.mkv"
+# Define the target folder in GCS
+# Note: We removed the specific .mkv filename here because we will generate 
+# multiple files (part-001, part-002, etc.) inside this folder.
+GCS_FOLDER="$GCS_URI/${VIDEO_NAME}_${TIMESTAMP}"
 
-echo "🎥 Starting Live Stream Capture..."
-echo "📡 Streaming DIRECTLY to: $GCS_TARGET"
-echo "ℹ️  Note: If the job crashes, the file will be safe in the bucket up to that point."
+echo "🎥 Starting Live Stream Capture (Segmented)..."
+echo "📡 Uploading segments to: $GCS_FOLDER/"
 
 # EXPLANATION OF COMMAND:
-# 1. yt-dlp -o -             -> Outputs the video data to 'Standard Out' (screen) instead of a file.
-# 2. --quiet --no-progress   -> Hides the progress bar so it doesn't mess up the video data stream.
-# 3. | gsutil cp - ...       -> Takes that video data and streams it instantly to Cloud Storage.
+# --split-by-time 15m       -> Cuts the video every 15 minutes.
+# --output ...              -> Naming pattern for chunks.
+# --exec ...                -> Runs this command after each chunk finishes.
+#                              {} is replaced by the filename.
+#                              We upload to GCS, then delete locally (rm) to save RAM.
 
 if ! yt-dlp "$YOUTUBE_URL" \
     $COOKIE_ARGS \
     --wait-for-video 15 \
     --live-from-start \
-    --output - \
-    --quiet --no-progress \
-    | gsutil cp - "$GCS_TARGET"; then
+    --split-by-time 15m \
+    --output "${VIDEO_NAME}_part-%(autonumber)s.mkv" \
+    --exec "gsutil cp {} '$GCS_FOLDER/' && rm {}" \
+    --quiet --no-progress; then
     
     echo "⚠️  Stream interrupted or ended."
 else
     echo "✅ Stream finished successfully."
 fi
-
-# -----------------------------------------------------------------
-# 4. Cleanup
-# -----------------------------------------------------------------
-rm -f "$COOKIE_FILE"
