@@ -7,7 +7,7 @@ variable "region" {
 variable "function_name" {
   description = "The name of the Cloud Function"
   type        = string
-  default     = "my-terraform-function"
+  default     = "youtube-monitoring-function"
 }
 
 variable "image_uri" {
@@ -38,5 +38,5 @@ variable "schedule" {
   description = "The schedule used for the Google function"
   type        = string
   #default     = "*/60 * * * *"
-  default = "*/15 * * * *"
+  default = "*/5 * * * *"
 }

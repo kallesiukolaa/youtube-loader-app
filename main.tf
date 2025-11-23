@@ -2,7 +2,6 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      # Using a stable modern version
       version = ">= 5.0.0"
     }
     google-beta = {
@@ -13,44 +12,54 @@ terraform {
 }
 
 provider "google" {
-  project     = file("project.txt")
+  # trimspace prevents "Permission denied" errors from hidden newlines
+  project     = trimspace(file("project.txt"))
   region      = var.region
   credentials = file("gkesa_acc.json")
 }
 
 provider "google-beta" {
-  project     = file("project.txt")
+  project     = trimspace(file("project.txt"))
   region      = var.region
   credentials = file("gkesa_acc.json")
 }
 
-# Get the default Service Account used by Cloud Run/Functions
-data "google_compute_default_service_account" "default" {
-  project = file("project.txt")
+# -----------------------------------------------------------------
+# 1. Identity & Security
+# -----------------------------------------------------------------
+
+locals {
+  project_id = trimspace(file("project.txt"))
+  # Use your custom service account to avoid default SA errors
+  service_account_email = "gke-sa-test@${local.project_id}.iam.gserviceaccount.com"
 }
 
-# Grant "Object User" (Read + Write) to the Video Bucket
-# This allows the job to:
-# 1. READ cookies.txt (Fixes "Proceeding without authentication")
-# 2. WRITE video files (Fixes upload permissions)
 resource "google_storage_bucket_iam_member" "storage_user" {
   bucket = google_storage_bucket.video_bucket.name
   role   = "roles/storage.objectUser"
-  member = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+  member = "serviceAccount:${local.service_account_email}"
 }
 
 # -----------------------------------------------------------------
 # 2. Storage Buckets
 # -----------------------------------------------------------------
 
-# Source Code Bucket
 resource "google_storage_bucket" "bucket" {
   name                        = "${var.function_name}-source-bucket123123"
   location                    = var.region
   uniform_bucket_level_access = true
+  
+  # Cleanup old source files if any
+  lifecycle_rule {
+    condition {
+      age = 1
+    }
+    action {
+      type = "Delete"
+    }
+  }
 }
 
-# Video Storage Bucket
 resource "google_storage_bucket" "video_bucket" {
   name                        = "${var.function_name}-videos-bucket123123"
   location                    = var.region
@@ -58,45 +67,46 @@ resource "google_storage_bucket" "video_bucket" {
 }
 
 # -----------------------------------------------------------------
-# 3. Cloud Function (Scheduler & Trigger)
+# 3. Cloud Function
 # -----------------------------------------------------------------
 
-# Zip the python source code
 data "archive_file" "source" {
   type        = "zip"
   source_dir  = "./function-source"
   output_path = "./function-source.zip"
 }
 
-# Upload zip to bucket
 resource "google_storage_bucket_object" "archive" {
+  # STATIC NAME (Overwrites the file, so no duplicates)
   name   = "function-source.zip"
   bucket = google_storage_bucket.bucket.name
   source = data.archive_file.source.output_path
+
+  # Metadata forces Terraform to re-upload if code changes
+  metadata = {
+    hash = data.archive_file.source.output_md5
+  }
 }
 
-# Enable APIs
 resource "google_project_service" "cloud_run_api" {
-  project            = file("project.txt")
+  project            = local.project_id
   service            = "run.googleapis.com"
   disable_on_destroy = false
 }
 
 resource "google_project_service" "cloud_scheduler_api" {
-  project            = file("project.txt")
+  project            = local.project_id
   service            = "cloudscheduler.googleapis.com"
   disable_on_destroy = false
 }
 
-# Pub/Sub Topic
 resource "google_pubsub_topic" "function_schedule_topic" {
-  project = file("project.txt")
+  project = local.project_id
   name    = "${var.function_name}-schedule-topic"
 }
 
-# Scheduler Job
 resource "google_cloud_scheduler_job" "function_scheduler" {
-  project   = file("project.txt")
+  project   = local.project_id
   name      = "${var.function_name}-scheduler"
   region    = var.region
   schedule  = var.schedule
@@ -104,14 +114,12 @@ resource "google_cloud_scheduler_job" "function_scheduler" {
 
   pubsub_target {
     topic_name = google_pubsub_topic.function_schedule_topic.id
-    # Default payload to check a specific handle (can be overridden)
-    data       = base64encode(jsonencode({"channel_handle": "CHANGE_ME_TO_DEFAULT_HANDLE"}))
+    data       = base64encode(file("check-channel-event.json"))
   }
 
   depends_on = [google_project_service.cloud_scheduler_api]
 }
 
-# The Cloud Function (Manager)
 resource "google_cloudfunctions2_function" "my_function" {
   name     = var.function_name
   location = var.region
@@ -122,8 +130,16 @@ resource "google_cloudfunctions2_function" "my_function" {
       storage_source {
         bucket = google_storage_bucket.bucket.name
         object = google_storage_bucket_object.archive.name
+        # Removed unsupported 'generation' attribute
       }
     }
+    
+    # 🛠️ THE FIX: Add the file hash as a build env var.
+    # When code changes -> Hash changes -> Terraform forces a Re-Build.
+    environment_variables = {
+        SOURCE_CODE_HASH = data.archive_file.source.output_md5
+    }
+    
     entry_point = "check_live_stream"
   }
 
@@ -134,17 +150,17 @@ resource "google_cloudfunctions2_function" "my_function" {
   }
 
   service_config {
+    service_account_email = local.service_account_email
     environment_variables = {
       JOB_NAME       = var.batch_job_name
       MOUNT_PATH     = var.mount_path
       VIDEO_BUCKET   = google_storage_bucket.video_bucket.name
       REGION         = var.region
-      GCP_PROJECT_ID = file("project.txt")
+      GCP_PROJECT_ID = local.project_id
     }
   }
 }
 
-# Make the Function Public (Optional - based on your original file)
 resource "google_cloud_run_service_iam_member" "invoker_v2" {
   location = google_cloudfunctions2_function.my_function.location
   service  = google_cloudfunctions2_function.my_function.name
@@ -153,16 +169,15 @@ resource "google_cloud_run_service_iam_member" "invoker_v2" {
 }
 
 # -----------------------------------------------------------------
-# 4. Cloud Run Job (The Worker - Simplified)
+# 4. Cloud Run Job
 # -----------------------------------------------------------------
 
 resource "google_project_service" "artifact_registry_api" {
-  project            = file("project.txt")
+  project            = local.project_id
   service            = "artifactregistry.googleapis.com"
   disable_on_destroy = false
 }
 
-# Proxy GHCR so Cloud Run can pull images reliably
 resource "google_artifact_registry_repository" "ghcr_proxy" {
   provider      = google-beta
   location      = var.region
@@ -170,7 +185,6 @@ resource "google_artifact_registry_repository" "ghcr_proxy" {
   description   = "Remote repository proxying ghcr.io"
   format        = "DOCKER"
   mode          = "REMOTE_REPOSITORY"
-  
   remote_repository_config {
     common_repository {
       uri = "https://ghcr.io"
@@ -181,7 +195,7 @@ resource "google_artifact_registry_repository" "ghcr_proxy" {
 
 locals {
   ghcr_repo_path    = trimprefix(var.image_uri, "ghcr.io/")
-  proxied_image_uri = "${var.region}-docker.pkg.dev/${file("project.txt")}/${google_artifact_registry_repository.ghcr_proxy.repository_id}/${local.ghcr_repo_path}"
+  proxied_image_uri = "${var.region}-docker.pkg.dev/${local.project_id}/${google_artifact_registry_repository.ghcr_proxy.repository_id}/${local.ghcr_repo_path}"
 }
 
 resource "google_cloud_run_v2_job" "batch_job" {
@@ -190,15 +204,14 @@ resource "google_cloud_run_v2_job" "batch_job" {
 
   template {
     template {
-      timeout = "21600s" # 6 Hours
+      timeout = "21600s"
+      service_account = local.service_account_email
 
       containers {
         name  = "main-container"
         image = local.proxied_image_uri
-        
         resources {
           limits = {
-            # We keep RAM high to be safe, but piping uses much less than this.
             memory = "4Gi" 
             cpu    = "2"
           }

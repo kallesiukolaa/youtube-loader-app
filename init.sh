@@ -75,4 +75,6 @@ gcloud services enable artifactregistry.googleapis.com --project=${PROJECT_ID}
 
 gcloud services enable cloudbuild.googleapis.com --project=${PROJECT_ID}
 
+gcloud services enable compute.googleapis.com --project=${PROJECT_ID}
+
 echo "${PROJECT_ID}" > project.txt
