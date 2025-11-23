@@ -35,34 +35,87 @@ else
 fi
 
 # -----------------------------------------------------------------
-# 3. Stream Logic (Segmented for Visibility)
+# 3. Stream Logic (Pipe to FFmpeg for Segmentation)
 # -----------------------------------------------------------------
 
-# Define the target folder in GCS
-# Note: We removed the specific .mkv filename here because we will generate 
-# multiple files (part-001, part-002, etc.) inside this folder.
+# Define a temporary local folder for segments (RAM disk)
+SEGMENT_DIR="/my-videos/segments"
+mkdir -p "$SEGMENT_DIR"
+cd "$SEGMENT_DIR"
+
+# GCS Destination Folder
 GCS_FOLDER="$GCS_URI/${VIDEO_NAME}_${TIMESTAMP}"
 
-echo "🎥 Starting Live Stream Capture (Segmented)..."
-echo "📡 Uploading segments to: $GCS_FOLDER/"
+echo "🎥 Starting Live Stream Capture with Segmentation..."
+echo "📡 Segments will be uploaded to: $GCS_FOLDER/"
 
-# EXPLANATION OF COMMAND:
-# --split-by-time 15m       -> Cuts the video every 15 minutes.
-# --output ...              -> Naming pattern for chunks.
-# --exec ...                -> Runs this command after each chunk finishes.
-#                              {} is replaced by the filename.
-#                              We upload to GCS, then delete locally (rm) to save RAM.
+# --- Background Uploader Function ---
+# This runs in parallel to the download. It checks for finished segments
+# (any segment that is NOT the most recent one) and moves them to GCS.
+upload_watcher() {
+    echo "👀 Watcher started..."
+    while true; do
+        # 1. List all mp4 files sorted by time (oldest first)
+        FILES=( $(ls -tr *.mp4 2>/dev/null) )
+        
+        # 2. Count files. We need at least 2 files to know the first one is finished.
+        # (FFmpeg keeps the latest file open for writing).
+        COUNT=${#FILES[@]}
+        
+        if [ "$COUNT" -gt 1 ]; then
+            # Loop through all files EXCEPT the last one (which is active)
+            # LIMIT is COUNT - 1
+            LIMIT=$((COUNT - 1))
+            
+            for (( i=0; i<LIMIT; i++ )); do
+                FILE="${FILES[$i]}"
+                echo "🚀 Uploading finished segment: $FILE"
+                
+                # Upload to GCS
+                if gsutil cp "$FILE" "$GCS_FOLDER/$FILE"; then
+                    echo "✅ Uploaded. Deleting local copy to save RAM."
+                    rm -f "$FILE"
+                else
+                    echo "❌ Upload failed for $FILE. Retrying next cycle."
+                fi
+            done
+        fi
+        
+        # Wait 60 seconds before checking again
+        sleep 60
+    done
+}
 
-if ! yt-dlp "$YOUTUBE_URL" \
+# Start the uploader in the background
+upload_watcher &
+WATCHER_PID=$!
+
+# --- Main Download Command (The Fix) ---
+# 1. yt-dlp -o -         -> Dumps video to Standard Output (Pipe)
+# 2. ffmpeg -i -         -> Reads from Standard Input
+# 3. -f segment          -> Activates Segment Muxer
+# 4. -segment_time 900   -> Splits every 900 seconds (15 mins)
+# 5. -reset_timestamps 1 -> Makes each segment playable individually
+# 6. video_part%03d.mp4  -> Naming pattern (part001, part002, etc.)
+
+yt-dlp "$YOUTUBE_URL" \
     $COOKIE_ARGS \
     --wait-for-video 15 \
     --live-from-start \
-    --split-by-time 15m \
-    --output "${VIDEO_NAME}_part-%(autonumber)s.mkv" \
-    --exec "gsutil cp {} '$GCS_FOLDER/' && rm {}" \
-    --quiet --no-progress; then
-    
-    echo "⚠️  Stream interrupted or ended."
-else
-    echo "✅ Stream finished successfully."
-fi
+    --output - \
+    --quiet --no-progress \
+    | ffmpeg \
+    -y -i - \
+    -c copy \
+    -f segment \
+    -segment_time 900 \
+    -reset_timestamps 1 \
+    "video_part%03d.mp4"
+
+# --- Cleanup ---
+# When the stream ends, upload the final remaining segment
+echo "🏁 Stream ended. Uploading remaining files..."
+gsutil cp *.mp4 "$GCS_FOLDER/" 2>/dev/null || true
+
+# Kill the background watcher
+kill "$WATCHER_PID"
