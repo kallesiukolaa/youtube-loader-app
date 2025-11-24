@@ -117,6 +117,9 @@ yt-dlp "$YOUTUBE_URL" \
     -S "proto:m3u8" \
     -f "best" \
     --output - \
+    --match-filters is_live \
+    --retry-sleep http:exp=1:30 \
+    --retries infinite \
     --quiet --no-progress \
     | ffmpeg \
     -y \
