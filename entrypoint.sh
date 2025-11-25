@@ -123,11 +123,9 @@ yt-dlp "$YOUTUBE_URL" \
     | ffmpeg \
     -y \
     -loglevel error \
-    -analyzeduration 1M \
-    -probesize 1M \
+    -analyzeduration 10M \
+    -probesize 10M \
     -fflags +flush_packets \
-    -muxdelay 0 \
-    -frag_duration 1000000 \
     -f mpegts \
     -i - \
     -c copy \
