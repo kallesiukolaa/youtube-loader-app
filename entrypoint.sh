@@ -123,8 +123,6 @@ yt-dlp "$YOUTUBE_URL" \
     | ffmpeg \
     -y \
     -loglevel error \
-    \
-    # INPUT OPTIONS GO HERE
     -analyzeduration 1M \
     -probesize 1M \
     -fflags +flush_packets \
@@ -132,8 +130,6 @@ yt-dlp "$YOUTUBE_URL" \
     -frag_duration 1000000 \
     -f mpegts \
     -i - \
-    \
-    # OUTPUT OPTIONS GO HERE
     -c copy \
     -f segment \
     -segment_time 300 \
