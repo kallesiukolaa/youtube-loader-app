@@ -113,22 +113,21 @@ WATCHER_PID=$!
 # 6. video_part%03d.mp4  -> Naming pattern (part001, part002, etc.)
 
 yt-dlp "$YOUTUBE_URL" \
-    $COOKIE_ARGS \
-    -S "proto:m3u8" \
-    -f "best" \
-    --output - \
-    --retry-sleep http:exp=1:30 \
-    --retries infinite \
-    --quiet --no-progress \
+    # ... yt-dlp options ...
     | ffmpeg \
     -y \
+    -loglevel error \
+    \
+    # INPUT OPTIONS GO HERE
     -analyzeduration 1M \
     -probesize 1M \
     -fflags +flush_packets \
     -muxdelay 0 \
     -frag_duration 1000000 \
-    -f mpegts -i - \
-    -loglevel error \
+    -f mpegts \
+    -i - \
+    \
+    # OUTPUT OPTIONS GO HERE
     -c copy \
     -f segment \
     -segment_time 300 \
