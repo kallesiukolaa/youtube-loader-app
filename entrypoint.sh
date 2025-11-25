@@ -113,7 +113,13 @@ WATCHER_PID=$!
 # 6. video_part%03d.mp4  -> Naming pattern (part001, part002, etc.)
 
 yt-dlp "$YOUTUBE_URL" \
-    # ... yt-dlp options ...
+    $COOKIE_ARGS \
+    -S "proto:m3u8" \
+    -f "best" \
+    --output - \
+    --retry-sleep http:exp=1:30 \
+    --retries infinite \
+    --quiet --no-progress \
     | ffmpeg \
     -y \
     -loglevel error \
