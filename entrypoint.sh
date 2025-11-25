@@ -117,7 +117,6 @@ yt-dlp "$YOUTUBE_URL" \
     -S "proto:m3u8" \
     -f "best" \
     --output - \
-    --match-filters is_live \
     --retry-sleep http:exp=1:30 \
     --retries infinite \
     --quiet --no-progress \
@@ -126,6 +125,8 @@ yt-dlp "$YOUTUBE_URL" \
     -analyzeduration 1M \
     -probesize 1M \
     -fflags +flush_packets \
+    -muxdelay 0 \
+    -frag_duration 1000000 \
     -f mpegts -i - \
     -loglevel error \
     -c copy \
@@ -141,3 +142,5 @@ gsutil cp *.mp4 "$GCS_FOLDER/" 2>/dev/null || true
 
 # Kill the background watcher
 kill "$WATCHER_PID"
+
+#56.22
