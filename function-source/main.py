@@ -2,12 +2,14 @@
 
 from googleapiclient.discovery import build
 import os
+import re
 import functions_framework
 import base64
 import json
 from google.cloud import run_v2, storage
-from datetime import date
+from datetime import date, datetime, timezone
 from urllib.parse import urlparse, parse_qs
+
 
 def get_current_date_yyyymmdd():
     """
@@ -129,6 +131,50 @@ def get_channel_id_from_handle(handle):
     else:
         return None
 
+def is_channel_streaming_cheap(channel_id, intervall_seconds):
+    """
+    Chacks if there has been any upload activity during the past 5 minutes. 
+    Only for avoiding to use search for no live streams
+    
+    Args:
+        channel_id: The ID of the YouTube channel to check.
+        
+    Returns:
+        True if the channel is uploaded something during the last 5 minutes
+    """
+    try:
+        # 1. Build the YouTube API client
+        youtube = build('youtube', 'v3')
+        
+        # 2. Call the activities.list method
+        # We limit the results to the most recent activity (maxResults=5)
+        # and only request the 'snippet' part.
+        request = youtube.activities().list(
+            part='snippet',
+            channelId=channel_id,
+            maxResults=20
+        )
+        
+        # 3. Execute the request
+        response = request.execute()
+        
+        # 4. Check the results
+        if not response.get('items'):
+            return False # No recent activity found
+
+        items = response.get('items')
+
+        # 5. Get only items that are at most intervall_seconds old
+        items = filter(lambda x: (datetime.now(timezone.utc) - datetime.fromisoformat(x['snippet']['publishedAt'])).total_seconds() < intervall_seconds and x['snippet']['type'] == 'upload', items)
+        items = list(items)
+
+        # 6. Return True if there is more than 0 events during the pest 5 minutes
+        return len(items) > 0
+
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return False
+
 # The entry point for the Google Cloud Function
 @functions_framework.cloud_event
 def check_live_stream(cloud_event):
@@ -174,6 +220,16 @@ def check_live_stream(cloud_event):
         youtube = build("youtube", "v3")
 
         channel_id = get_channel_id_from_handle(channel_handle)
+
+        intervall_seconds = 300
+
+        # Try to avoid using youtube.search() as it costs 100 credits.
+        if not is_channel_streaming_cheap(channel_id, intervall_seconds):
+            print(f'Channel {channel_handle} is not streaming currently.')
+            return {
+                "channel_id": channel_id,
+                "is_live": False
+            }, 200
 
         # 3. Call the search.list method
         search_response = youtube.search().list(
