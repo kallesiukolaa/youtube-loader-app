@@ -47,6 +47,8 @@ cd "$SEGMENT_DIR"
 # It fixes the "CommandException" caused by '?', '|', and '!'.
 echo "Original Name: $VIDEO_NAME"
 VIDEO_NAME=$(echo "$VIDEO_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
+SUFFIX=$RANDOM
+VIDEO_NAME="${VIDEO_NAME}_${SUFFIX}"
 echo "Sanitized Name: $VIDEO_NAME"
 
 # GCS Destination Folder
