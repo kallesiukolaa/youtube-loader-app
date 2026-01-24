@@ -128,8 +128,7 @@ yt-dlp "$YOUTUBE_URL" \
     -analyzeduration 10M \
     -probesize 10M \
     -fflags +flush_packets \
-    -f mpegts \
-    -i - \
+    -i - \                     # <--- REMOVED "-f mpegts" above this line
     -c copy \
     -f segment \
     -segment_time 300 \
