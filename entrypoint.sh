@@ -121,14 +121,14 @@ yt-dlp "$YOUTUBE_URL" \
     --output - \
     --retry-sleep http:exp=1:30 \
     --retries infinite \
-    --quiet --no-progress \
+    --no-progress \
     | ffmpeg \
     -y \
-    -loglevel error \
-    -analyzeduration 10M \
-    -probesize 10M \
+    -loglevel warning \
+    -analyzeduration 50M \
+    -probesize 50M \
     -fflags +flush_packets \
-    -i - \                     # <--- REMOVED "-f mpegts" above this line
+    -i - \
     -c copy \
     -f segment \
     -segment_time 300 \
