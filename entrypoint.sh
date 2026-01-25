@@ -115,7 +115,8 @@ WATCHER_PID=$!
 # 6. video_part%03d.mp4  -> Naming pattern (part001, part002, etc.)
 
 yt-dlp "$YOUTUBE_URL" \
-    $COOKIE_ARGS \
+    #$COOKIE_ARGS \
+    --extractor-args "youtube:player_client=android_tv" \
     -S "proto:m3u8" \
     -f "best" \
     --output - \
